@@ -3,11 +3,14 @@ package com.ke.mianshiya.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.ke.mianshiya.model.dto.post.PostQueryRequest;
 import com.ke.mianshiya.model.dto.question.QuestionQueryRequest;
+import com.ke.mianshiya.model.entity.Post;
 import com.ke.mianshiya.model.entity.Question;
 import com.ke.mianshiya.model.vo.QuestionVO;
 
 import javax.servlet.http.HttpServletRequest;
+import java.util.List;
 
 /**
  * 题目服务
@@ -57,4 +60,18 @@ public interface QuestionService extends IService<Question> {
      * @return
      */
     Page<Question> listQuestionByPage(QuestionQueryRequest questionQueryRequest);
+
+    /**
+     * 从 ES 查询
+     *
+     * @param questionQueryRequest
+     * @return
+     */
+    Page<Question> searchFromEs(QuestionQueryRequest questionQueryRequest);
+
+    /**
+     * 批量删除题目
+     * @param questionIdList
+     */
+    void batchDeleteQuestion(List<Long> questionIdList);
 }

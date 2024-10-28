@@ -1,5 +1,6 @@
 package com.ke.mianshiya.controller;
 
+import cn.dev33.satoken.annotation.SaCheckRole;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -11,10 +12,7 @@ import com.ke.mianshiya.common.ResultUtils;
 import com.ke.mianshiya.constant.UserConstant;
 import com.ke.mianshiya.exception.BusinessException;
 import com.ke.mianshiya.exception.ThrowUtils;
-import com.ke.mianshiya.model.dto.questionbankquestion.QuestionBankQuestionAddRequest;
-import com.ke.mianshiya.model.dto.questionbankquestion.QuestionBankQuestionQueryRequest;
-import com.ke.mianshiya.model.dto.questionbankquestion.QuestionBankQuestionRemoveRequest;
-import com.ke.mianshiya.model.dto.questionbankquestion.QuestionBankQuestionUpdateRequest;
+import com.ke.mianshiya.model.dto.questionbankquestion.*;
 import com.ke.mianshiya.model.entity.QuestionBankQuestion;
 import com.ke.mianshiya.model.entity.User;
 import com.ke.mianshiya.model.vo.QuestionBankQuestionVO;
@@ -129,7 +127,7 @@ public class QuestionBankQuestionController {
      * @return
      */
     @PostMapping("/update")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> updateQuestionBankQuestion(@RequestBody QuestionBankQuestionUpdateRequest questionBankQuestionUpdateRequest) {
         if (questionBankQuestionUpdateRequest == null || questionBankQuestionUpdateRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -172,7 +170,7 @@ public class QuestionBankQuestionController {
      * @return
      */
     @PostMapping("/list/page")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Page<QuestionBankQuestion>> listQuestionBankQuestionByPage(@RequestBody QuestionBankQuestionQueryRequest questionBankQuestionQueryRequest) {
         long current = questionBankQuestionQueryRequest.getCurrent();
         long size = questionBankQuestionQueryRequest.getPageSize();
@@ -229,4 +227,36 @@ public class QuestionBankQuestionController {
     }
 
     // endregion
+
+    /**
+     * 批量从题库中移除题目 （仅管理员）
+     * @param removeBatchRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/remove/batch")
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> batchRemoveQuestionFromBank(@RequestBody QuestionBankQuestionRemoveBatchRequest removeBatchRequest, HttpServletRequest request){
+        //参数校验
+        ThrowUtils.throwIf(removeBatchRequest==null,ErrorCode.PARAMS_ERROR,"请求参数为空");
+        questionBankQuestionService.batchRemoveQuestionFromBank(removeBatchRequest.getQuestionBankId(), removeBatchRequest.getQuestionIdList());
+        return ResultUtils.success(true);
+    }
+
+    /**
+     * 批量向题库中添加题目 （仅管理员）
+     * @param addBatchRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/add/batch")
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> batchAddQuestionFromBank(@RequestBody QuestionBankQuestionAddBatchRequest addBatchRequest, HttpServletRequest request){
+        //参数校验
+        ThrowUtils.throwIf(addBatchRequest==null,ErrorCode.PARAMS_ERROR,"请求参数为空");
+        User loginUser = userService.getLoginUser(request);
+        ThrowUtils.throwIf(loginUser==null,ErrorCode.NO_AUTH_ERROR);
+        questionBankQuestionService.batchAddQuestionToBank(addBatchRequest.getQuestionBankId(), addBatchRequest.getQuestionIdList(),loginUser);
+        return ResultUtils.success(true);
+    }
 }

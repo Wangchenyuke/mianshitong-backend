@@ -2,6 +2,7 @@ package com.ke.mianshiya.service.impl;
 
 import static com.ke.mianshiya.constant.UserConstant.USER_LOGIN_STATE;
 
+import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.collection.CollUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -15,6 +16,7 @@ import com.ke.mianshiya.model.entity.User;
 import com.ke.mianshiya.model.enums.UserRoleEnum;
 import com.ke.mianshiya.model.vo.LoginUserVO;
 import com.ke.mianshiya.model.vo.UserVO;
+import com.ke.mianshiya.satoken.DeviceUtils;
 import com.ke.mianshiya.service.UserService;
 import com.ke.mianshiya.utils.SqlUtils;
 
@@ -114,7 +116,16 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户不存在或密码错误");
         }
         // 3. 记录用户的登录态
-        request.getSession().setAttribute(USER_LOGIN_STATE, user);
+//        request.getSession().setAttribute(USER_LOGIN_STATE, user);
+
+        //Sa-token登录 将用户id作为loginId 使用Sa-token框架实现登录鉴权  参数二：设置登录设备
+        //获取用户登录设备
+        String device = DeviceUtils.getRequestDevice(request);
+        //登录
+        StpUtil.login(user.getId(),device);
+        //将用户信息存入Session
+        StpUtil.getSession().set(USER_LOGIN_STATE,user);
+
         return this.getLoginUserVO(user);
     }
 
@@ -159,14 +170,20 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     @Override
     public User getLoginUser(HttpServletRequest request) {
         // 先判断是否已登录
-        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
-        User currentUser = (User) userObj;
-        if (currentUser == null || currentUser.getId() == null) {
-            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
-        }
+//        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
+//        User currentUser = (User) userObj;
+//
+//        if (currentUser == null || currentUser.getId() == null) {
+//            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
+//        }
+
+        String userId = (String) StpUtil.getLoginIdDefaultNull();
         // 从数据库查询（追求性能的话可以注释，直接走缓存）
-        long userId = currentUser.getId();
-        currentUser = this.getById(userId);
+        if (userId == null){
+            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR,"未登录");
+        }
+        //查询数据库
+        User currentUser = this.getById(userId);
         if (currentUser == null) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
@@ -218,11 +235,15 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      */
     @Override
     public boolean userLogout(HttpServletRequest request) {
-        if (request.getSession().getAttribute(USER_LOGIN_STATE) == null) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR, "未登录");
+//        if (request.getSession().getAttribute(USER_LOGIN_STATE) == null) {
+//            throw new BusinessException(ErrorCode.OPERATION_ERROR, "未登录");
+//        }
+        //使用Sa-token的方式
+        if (!StpUtil.isLogin()){
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR,"未登录");
         }
-        // 移除登录态
-        request.getSession().removeAttribute(USER_LOGIN_STATE);
+        // 移除登录态 你可以传参数 第二个参数是设备 你可以指定设备注销
+        StpUtil.logout();//不传参数就是将所有设备都注销
         return true;
     }
 

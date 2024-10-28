@@ -1,13 +1,16 @@
 package com.ke.mianshiya.controller;
 
+import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.collection.CollUtil;
-import cn.hutool.json.JSON;
 import cn.hutool.json.JSONUtil;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.alibaba.csp.sentinel.Entry;
+import com.alibaba.csp.sentinel.EntryType;
+import com.alibaba.csp.sentinel.SphU;
+import com.alibaba.csp.sentinel.slots.block.BlockException;
+import com.alibaba.csp.sentinel.slots.block.degrade.DegradeException;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.ke.mianshiya.annotation.AuthCheck;
+import com.ke.mianshiya.annotation.HotKeyCheck;
 import com.ke.mianshiya.common.BaseResponse;
 import com.ke.mianshiya.common.DeleteRequest;
 import com.ke.mianshiya.common.ErrorCode;
@@ -15,17 +18,14 @@ import com.ke.mianshiya.common.ResultUtils;
 import com.ke.mianshiya.constant.UserConstant;
 import com.ke.mianshiya.exception.BusinessException;
 import com.ke.mianshiya.exception.ThrowUtils;
-import com.ke.mianshiya.model.dto.question.QuestionAddRequest;
-import com.ke.mianshiya.model.dto.question.QuestionEditRequest;
-import com.ke.mianshiya.model.dto.question.QuestionQueryRequest;
-import com.ke.mianshiya.model.dto.question.QuestionUpdateRequest;
+import com.ke.mianshiya.manager.RedisCountManager;
+import com.ke.mianshiya.model.dto.question.*;
 import com.ke.mianshiya.model.entity.Question;
-import com.ke.mianshiya.model.entity.QuestionBankQuestion;
 import com.ke.mianshiya.model.entity.User;
 import com.ke.mianshiya.model.vo.QuestionVO;
-import com.ke.mianshiya.service.QuestionBankQuestionService;
 import com.ke.mianshiya.service.QuestionService;
 import com.ke.mianshiya.service.UserService;
+import com.ke.mianshiya.strategy.CountContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
@@ -33,6 +33,7 @@ import org.springframework.web.bind.annotation.*;
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 题目接口
@@ -51,6 +52,9 @@ public class QuestionController {
     @Resource
     private UserService userService;
 
+    @Resource
+    private CountContext countContext;
+
 
 
     // region 增删改查
@@ -63,7 +67,7 @@ public class QuestionController {
      * @return
      */
     @PostMapping("/add")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Long> addQuestion(@RequestBody QuestionAddRequest questionAddRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(questionAddRequest == null, ErrorCode.PARAMS_ERROR);
         // todo 在此处将实体类和 DTO 进行转换
@@ -94,7 +98,7 @@ public class QuestionController {
      * @return
      */
     @PostMapping("/delete")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> deleteQuestion(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
         if (deleteRequest == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -121,7 +125,7 @@ public class QuestionController {
      * @return
      */
     @PostMapping("/update")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> updateQuestion(@RequestBody QuestionUpdateRequest questionUpdateRequest) {
         if (questionUpdateRequest == null || questionUpdateRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -152,13 +156,46 @@ public class QuestionController {
      * @return
      */
     @GetMapping("/get/vo")
+    @HotKeyCheck(keyPrefix = "question_detail_")
     public BaseResponse<QuestionVO> getQuestionVOById(long id, HttpServletRequest request) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
+        //检测爬虫
+        User loginUser = userService.getLoginUser(request);
+        crawlerDetect(loginUser.getId());
         // 查询数据库
         Question question = questionService.getById(id);
         ThrowUtils.throwIf(question == null, ErrorCode.NOT_FOUND_ERROR);
         // 获取封装类
         return ResultUtils.success(questionService.getQuestionVO(question, request));
+    }
+
+    /**
+     * 检测爬虫
+     * @param loginUserId
+     */
+    private void crawlerDetect(long loginUserId){
+        final int WARN_COUNT = 10;
+        final int BAN_COUNT = 20;
+//        String key = "user:access:"+loginUserId;
+//        long count = redisCountManager.incrAndGetCount(key, 1, TimeUnit.MINUTES, 180);
+
+        long count = countContext.incrAndGetCount(loginUserId);
+        //警告
+        if (count==WARN_COUNT){
+            throw new BusinessException(110,"警告访问过于频繁");
+        }
+
+        //封禁
+        if (count==BAN_COUNT){
+            //将用户踢下线
+            StpUtil.kickout(loginUserId);
+            //将用户权限改为封禁
+            User user = new User();
+            user.setId(loginUserId);
+            user.setUserRole(UserConstant.BAN_ROLE);
+            userService.updateById(user);
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR,"账号已被封禁");
+        }
     }
 
     /**
@@ -168,7 +205,7 @@ public class QuestionController {
      * @return
      */
     @PostMapping("/list/page")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Page<Question>> listQuestionByPage(@RequestBody QuestionQueryRequest questionQueryRequest) {
         ThrowUtils.throwIf(questionQueryRequest==null,ErrorCode.PARAMS_ERROR);
         Page<Question> questionPage = questionService.listQuestionByPage(questionQueryRequest);
@@ -197,6 +234,61 @@ public class QuestionController {
     }
 
     /**
+     * 分页获取题目列表（封装类）
+     *
+     * @param questionQueryRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/list/page/vo/sentinel")
+    public BaseResponse<Page<QuestionVO>> listQuestionVOByPageSentinel(@RequestBody QuestionQueryRequest questionQueryRequest,
+                                                               HttpServletRequest request) {
+        long current = questionQueryRequest.getCurrent();
+        long size = questionQueryRequest.getPageSize();
+
+        // 限制爬虫
+        ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);//限制一次查询的条数
+
+        //基于IP限流
+        String remoteAddr = request.getRemoteAddr();
+        Entry entry = null;
+        try {
+            //定义资源
+            entry = SphU.entry("listQuestionVOByPage", EntryType.IN,1,remoteAddr);
+            // 查询数据库
+            Page<Question> questionPage = questionService.page(new Page<>(current, size),
+                    questionService.getQueryWrapper(questionQueryRequest));
+            // 获取封装类
+            return ResultUtils.success(questionService.getQuestionVOPage(questionPage, request));
+        } catch (Throwable ex){
+            //判断是不是业务异常
+            if (!BlockException.isBlockException(ex)){
+                return ResultUtils.error(ErrorCode.SYSTEM_ERROR,"系统错误");
+            }
+            //判断是不是熔断之后的异常
+            if (ex instanceof DegradeException){
+                handleFallback(questionQueryRequest,request,ex);
+            }
+            // 限流操作
+            return ResultUtils.error(ErrorCode.SYSTEM_ERROR, "访问过于频繁，请稍后再试");
+        } finally {
+            if (entry != null){
+                entry.exit(1,remoteAddr);
+            }
+        }
+    }
+
+    /**
+     * listQuestionBankVOByPage 降级操作：直接返回本地数据
+     */
+    public BaseResponse<Page<QuestionVO>> handleFallback(@RequestBody QuestionQueryRequest questionQueryRequest,
+                                                             HttpServletRequest request, Throwable ex) {
+
+        // 可以返回本地数据或空数据
+        return ResultUtils.success(null);
+    }
+
+    /**
      * 分页获取当前登录用户创建的题目列表
      *
      * @param questionQueryRequest
@@ -221,6 +313,23 @@ public class QuestionController {
         return ResultUtils.success(questionService.getQuestionVOPage(questionPage, request));
     }
 
+
+    /**
+     * 分页搜索（从 ES 查询，封装类）
+     *
+     * @param questionQueryRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/search/page/vo")
+    public BaseResponse<Page<QuestionVO>> searchQuestionVOByPage(@RequestBody QuestionQueryRequest questionQueryRequest,
+                                                         HttpServletRequest request) {
+        long size = questionQueryRequest.getPageSize();
+        // 限制爬虫
+        ThrowUtils.throwIf(size > 200, ErrorCode.PARAMS_ERROR);
+        Page<Question> questionPage = questionService.searchFromEs(questionQueryRequest);
+        return ResultUtils.success(questionService.getQuestionVOPage(questionPage, request));
+    }
     /**
      * 编辑题目（给用户使用）
      *
@@ -229,7 +338,7 @@ public class QuestionController {
      * @return
      */
     @PostMapping("/edit")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> editQuestion(@RequestBody QuestionEditRequest questionEditRequest, HttpServletRequest request) {
         if (questionEditRequest == null || questionEditRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -259,4 +368,13 @@ public class QuestionController {
     }
 
     // endregion
+
+    @PostMapping("/delete/batch")
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> batchDeleteQuestion(@RequestBody QuestionDeleteBatchRequest questionDeleteBatchRequest,
+                                                     HttpServletRequest request){
+        ThrowUtils.throwIf(questionDeleteBatchRequest==null,ErrorCode.PARAMS_ERROR,"请求参数为空");
+        questionService.batchDeleteQuestion(questionDeleteBatchRequest.getQuestionIdList());
+        return ResultUtils.success(true);
+    }
 }

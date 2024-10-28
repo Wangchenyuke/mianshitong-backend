@@ -1,5 +1,7 @@
 package com.ke.mianshiya.exception;
 
+import cn.dev33.satoken.exception.NotLoginException;
+import cn.dev33.satoken.exception.NotRoleException;
 import com.ke.mianshiya.common.BaseResponse;
 import com.ke.mianshiya.common.ErrorCode;
 import com.ke.mianshiya.common.ResultUtils;
@@ -28,4 +30,18 @@ public class GlobalExceptionHandler {
         log.error("RuntimeException", e);
         return ResultUtils.error(ErrorCode.SYSTEM_ERROR, "系统错误");
     }
+
+    @ExceptionHandler(NotLoginException.class)
+    public BaseResponse<?> notLoginExceptionHandler(NotLoginException e) {
+        log.error("NotLoginException", e);
+        return ResultUtils.error(ErrorCode.NOT_LOGIN_ERROR, "未登录");
+    }
+
+    @ExceptionHandler(NotRoleException.class)
+    public BaseResponse<?> notRoleExceptionHandler(NotRoleException e) {
+        log.error("NotLoginException", e);
+        return ResultUtils.error(ErrorCode.NO_AUTH_ERROR, "没有权限");
+
+    }
+
 }

@@ -57,6 +57,7 @@ public enum UserRoleEnum {
         return value;
     }
 
+
     public String getText() {
         return text;
     }
